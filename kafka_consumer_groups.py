@@ -1,12 +1,10 @@
+import threading
+import time
+
 from kafka import KafkaConsumer, TopicPartition
 from kafka.client_async import KafkaClient
 from kafka.protocol import admin
-import time
-import threading
-import ssl
 from kafka.protocol.group import MemberAssignment
-#import logging
-#logging.basicConfig(level=logging.DEBUG)
 
 '''
 This class retrieve all consumer groups and information about members and lag using Kafka API.
@@ -27,7 +25,8 @@ class KafkaConsumerGroups:
     ssl_keyfile = None
     ssl_context = None
 
-    def __init__(self, kafka_brokers, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_context, timeout=5000):
+    def __init__(self, kafka_brokers, security_protocol="", sasl_mechanism="",
+                 sasl_plain_username="", sasl_plain_password="", ssl_context="", timeout=5000):
         self.kafka_brokers = kafka_brokers
         self.security_protocol = security_protocol
         self.sasl_mechanism = sasl_mechanism
@@ -35,7 +34,12 @@ class KafkaConsumerGroups:
         self.sasl_plain_password = sasl_plain_password
         self.ssl_context = ssl_context
         self.timeout = timeout
-        self.client = KafkaClient(bootstrap_servers=kafka_brokers, security_protocol=security_protocol, sasl_mechanism=sasl_mechanism, sasl_plain_username=sasl_plain_username, sasl_plain_password=sasl_plain_password, ssl_context=ssl_context, timeout=timeout)
+        if security_protocol:
+            self.client = KafkaClient(bootstrap_servers=kafka_brokers, security_protocol=security_protocol,
+                                      sasl_mechanism=sasl_mechanism, sasl_plain_username=sasl_plain_username,
+                                      sasl_plain_password=sasl_plain_password, ssl_context=ssl_context, timeout=timeout)
+        else:
+            self.client = KafkaClient(bootstrap_servers=kafka_brokers, timeout=timeout)
         self.lag_topics_found = []
         self.lag_total = 0
 
@@ -66,7 +70,7 @@ class KafkaConsumerGroups:
 
     def get_members(self, node_id, group_name):
         describe_groups_request = admin.DescribeGroupsRequest_v0(
-            groups=[(group_name)]
+            groups=[group_name]
         )
         future = self.client.send(node_id, describe_groups_request)
         self.client.poll(timeout_ms=self.timeout, future=future)
@@ -75,11 +79,12 @@ class KafkaConsumerGroups:
 
         if error_code != 0:
             print(
-                "Kafka API - RET admin.DescribeGroupsRequest, error_code={}, group_id={}, state={}, protocol_type={}, protocol={}, members_count={}".format(
+                "Kafka API - RET admin.DescribeGroupsRequest, error_code={}, group_id={}, state={}, protocol_type={}, \
+                protocol={}, members_count={}".format(
                     error_code, group_id, state, protocol_type, protocol, len(members)))
             exit(1)
 
-        lmembers=[]
+        lmembers = []
         for member in members:
             (member_id, client_id, client_host, member_metadata, member_assignment) = member
             lmembers.append({'member_id': member_id, 'client_id': client_id, 'client_host': client_host})
@@ -88,7 +93,7 @@ class KafkaConsumerGroups:
 
     def describe(self, node_id, group_name):
         describe_groups_request = admin.DescribeGroupsRequest_v0(
-            groups=[(group_name)]
+            groups=[group_name]
         )
         future = self.client.send(node_id, describe_groups_request)
         self.client.poll(timeout_ms=self.timeout, future=future)
@@ -97,7 +102,8 @@ class KafkaConsumerGroups:
 
         if error_code != 0:
             print(
-                "Kafka API - RET admin.DescribeGroupsRequest, error_code={}, group_id={}, state={}, protocol_type={}, protocol={}, members_count={}".format(
+                "Kafka API - RET admin.DescribeGroupsRequest, error_code={}, group_id={}, state={}, protocol_type={}, \
+                protocol={}, members_count={}".format(
                     error_code, group_id, state, protocol_type, protocol, len(members)))
             exit(1)
 
@@ -150,16 +156,23 @@ class KafkaConsumerGroups:
 
         return self.lag_total, list(set(self.lag_topics_found))
 
-    def get_lag_by_topic(self, group_name, topic):
-        consumer = KafkaConsumer(
-            bootstrap_servers=self.kafka_brokers,
-            group_id=group_name,
-            security_protocol=self.security_protocol,
-            sasl_mechanism=self.sasl_mechanism,
-            sasl_plain_username=self.sasl_plain_username,
-            sasl_plain_password=self.sasl_plain_password,
-            ssl_context=self.ssl_context
-        )
+    def get_lag_by_topic(self, group_name, topic, security_protocol=""):
+        if security_protocol:
+            consumer = KafkaConsumer(
+                bootstrap_servers=self.kafka_brokers,
+                group_id=group_name,
+                security_protocol=self.security_protocol,
+                sasl_mechanism=self.sasl_mechanism,
+                sasl_plain_username=self.sasl_plain_username,
+                sasl_plain_password=self.sasl_plain_password,
+                ssl_context=self.ssl_context
+            )
+        else:
+            consumer = KafkaConsumer(
+                bootstrap_servers=self.kafka_brokers,
+                group_id=group_name
+            )
+
         partitions_per_topic = consumer.partitions_for_topic(topic)
 
         for partition in partitions_per_topic:
@@ -173,4 +186,3 @@ class KafkaConsumerGroups:
                 self.lag_total += (last_offset - committed)
 
         consumer.close(autocommit=False)
-        return
